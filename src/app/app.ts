@@ -30,15 +30,34 @@ export class App implements OnInit {
   selectedFile: File | null = null;
   selectedFilePath: string = '';
   quality: 'low' | 'medium' | 'high' | 'deep-fried' = 'high';
+  errorOccured: boolean = false;
+  isDraggingOver: boolean = false;
 
   ngOnInit() {
     this.load();
     document.getElementById("drag-and-drop")!.addEventListener("drop", this.dropHandler);
     document.getElementById("drag-and-drop")!.addEventListener("dragover", this.dragOverHandler);
+    document.getElementById("drag-and-drop")!.addEventListener("dragenter", this.dragEnterHandler);
+    document.getElementById("drag-and-drop")!.addEventListener("dragleave", this.dragLeaveHandler);
   }
 
   load = (): Promise<void> => {
-    this.ffmpeg = createFFmpeg();
+    this.ffmpeg = createFFmpeg({
+      log: true
+    });
+    
+    this.ffmpeg.setLogger(({ message }) => {
+      if (message.includes('pthread sent an error')) {
+        console.error('FFmpeg error:', message);
+        this.loading = false;
+        this.load();
+        this.errorOccured = true;
+        setTimeout(() => {
+          this.errorOccured = false;
+        }, 3000);
+      }
+    });
+    
     return this.ffmpeg.load().then(() => {
       return Promise.resolve();
     })
@@ -86,14 +105,18 @@ export class App implements OnInit {
 
     this.ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(this.selectedFile));
 
+    console.log('Starting video compression...');
+
     await this.ffmpeg.run(
       '-i', 'input.mp4',
       '-vcodec', 'libx264',
       '-crf', this.getCrfValue(),
       'output.mp4'
     );
+
+    console.log('Video compression completed.');
   
-    const videoURL = URL.createObjectURL(new Blob([this.ffmpeg.FS('readFile', 'output.mp4').buffer], { type: 'video/mp4' }));
+    const videoURL = URL.createObjectURL(new Blob([this.ffmpeg.FS('readFile', 'output.mp4').buffer as any], { type: 'video/mp4' }));
 
     this.downloadFile(videoURL, `compressed_${this.selectedFile!.name}`);
   }
@@ -117,6 +140,7 @@ export class App implements OnInit {
 
   dropHandler = (ev: any) => {
     ev.preventDefault();
+    this.isDraggingOver = false;
   
     let droppedFile: File | null = null;
   
@@ -156,5 +180,15 @@ export class App implements OnInit {
 
   dragOverHandler = (ev: any) => {
     ev.preventDefault();
+  }
+
+  dragEnterHandler = (ev: any) => {
+    ev.preventDefault();
+    this.isDraggingOver = true;
+  }
+
+  dragLeaveHandler = (ev: any) => {
+    ev.preventDefault();
+    this.isDraggingOver = false;
   }
 }
